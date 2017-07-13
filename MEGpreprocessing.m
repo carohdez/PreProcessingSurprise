@@ -75,7 +75,7 @@ else
     % show head motion without those removed
     cc_rel = computeHeadRotation(data);
 
-    % plot the rotation of the head
+    % plo1t the rotation of the head
     plot(cc_rel); ylabel('Motion resid');
     axis tight; box off;
 end
@@ -166,9 +166,9 @@ remaining_tr = [remaining_tr, length(data.trial)];
 % further.
 % ==================================================================
 
-% we did not record EOGH, so we skip tis step using ft
+% We did not record EOGH, so we skip this step using ft
 
-%Alternative saccades detection based on eyelink channels
+% Alternative saccades detection based on eyelink channels
 ranges = [5 -5];
 screen_x = [0 1920];
 screen_y= [0 1080]; 
@@ -178,35 +178,44 @@ xcenter = screen_x(2)/2;
 ycenter = screen_y(2)/2;
 tr_sacc = [];
 
-%%%%%%%%%%%%%%%%
-% ypos = nan(length(data.trial),length(data.time{find(data.trialinfo(:,3)==max(data.trialinfo(:,3)))}));
-% ypos_times = data.time{find(data.trialinfo(:,3)==max(data.trialinfo(:,3)))};
+% Alternative saccades detection with velocity acceleration approach
+hz = 1200; % sampling frequency, hdr = ft_read_header(cfg.dataset);
+threshold = 30; % taken from Niklas's script
+acc_thresh = 2000; % taken from Niklas's script
 
+% For plotting
 max_tr = find(data.trialinfo(:,3)==max(data.trialinfo(:,3)));
 ypos = nan(length(data.trialinfo),length(data.time{max_tr(1)}));
 ypos_times = data.time{max_tr(1)};
-%%%%%%%%%%%%%%%%
 
 for i=1:length(data.trial),
     sacc = 0;
     [x, y, z] = eye_voltage2gaze(data.trial{i}, ranges, screen_x, screen_y, ch_mapping);
-    ypos(i,1:length(y)) = y;     %%%%%%%%%%%%%%%%%
+    ypos(i,1:length(y)) = y;
     sacc = check_saccade(x, y, xcenter, ycenter, ppd);
+%     if sacc == 0
+%         % Detect saccades with velocity acceleration approach
+%         sacc = check_saccade_vel_acc(x, y, hz, threshold, acc_thresh, ppd);
+%     end
     if sacc > 0
         tr_sacc = [tr_sacc, i];
     end
 end
-subplot(4,4,16), hold on;
-plot(ypos_times,ypos(tr_sacc,:)','Color',[1 0 0]);
-plot(ypos_times,ypos(~ismember([1:length(data.trial)],tr_sacc),:)','Color',[0.6 0.6 0.6]);
-xlim([min(ypos_times) max(ypos_times)]);
+if ~isempty(tr_sacc)
+    subplot(4,4,16), hold on;
+    plot(ypos_times,ypos(tr_sacc,:)','Color',[1 0 0]);
+    plot(ypos_times,ypos(~ismember([1:length(data.trial)],tr_sacc),:)','Color',[0.6 0.6 0.6]);
+    xlim([min(ypos_times) max(ypos_times)]);
 
-fprintf('Saccades detected based on Eyelink channels: %d \n',length(tr_sacc));
-% remove those trials
-cfg                 = [];
-cfg.trials          = true(1, length(data.trial));
-cfg.trials(tr_sacc) = false; % remove these trials
-data                = ft_selectdata(cfg, data);
+    fprintf('Saccades detected based on Eyelink channels: %d \n',length(tr_sacc));
+    % remove those trials
+    cfg                 = [];
+    cfg.trials          = true(1, length(data.trial));
+    cfg.trials(tr_sacc) = false; % remove these trials
+    data                = ft_selectdata(cfg, data);
+end
+
+remaining_tr = [remaining_tr, length(data.trial)]; 
 
 % ==================================================================
 % 4. REMOVE TRIALS WITH JUMPS
@@ -366,16 +375,28 @@ set(gca, 'xtick', [10 50 100], 'tickdir', 'out');
 remaining_tr = [remaining_tr, length(data.trial)];
 
 data.remaining_tr = remaining_tr;
-
+trl = data.cfg.trl;
 %save data file
 savepath = '/mnt/homes/home024/chernandez/meg_data/surprise/preprocessed/Data/';
 namefile = strcat(subject,'-',session,'_Surprise_Preprocessed_',recording,'.mat');
-save([savepath,namefile],'data','-v7.3');
+save([savepath,namefile],'data','remaining_tr','trl','-v7.3');
 
 %save plots
 savepath = '/mnt/homes/home024/chernandez/meg_data/surprise/preprocessed/Plots/';
 namefile = strcat(subject,'-',session,'_Surprise_Preprocessed_Plot_',recording);
-print([savepath,namefile],'-dpng');
+
+
+% this is to verify the sacc new approach (to save only info trials
+% rejected)
+% % %save data file
+% % savepath = '/mnt/homes/home024/chernandez/meg_data/surprise/preprocessed/Data/';
+% % namefile = strcat(subject,'-',session,'_Surprise_Preprocessed_sacc_',recording,'.mat');
+% % save([savepath,namefile],'remaining_tr','trl','-v7.3');
+% % 
+% % %save plots
+% % savepath = '/mnt/homes/home024/chernandez/meg_data/surprise/preprocessed/Plots/';
+% % namefile = strcat(subject,'-',session,'_Surprise_Preprocessed_Plot_sacc_',recording);
+% % print([savepath,namefile],'-dpng');
 end
 
 function cc_rel = computeHeadRotation(data)
@@ -476,3 +497,55 @@ end
 
 end
 
+function sacc = check_saccade(xgaze, ygaze, xcenter, ycenter, ppd)
+    sacc = 0;
+    x = (xgaze-xcenter)/ppd;
+    y = (ygaze-ycenter)/ppd;
+    d = (x.^2 + y.^2).^.5;
+    a=d(2:length(d));
+    if any(a>4)
+            sacc = 1;
+    end
+end
+
+function [sacc, sacc_times] = check_saccade_vel_acc(xgaze, ygaze, Hz, threshold, acc_thresh, ppd)
+    
+    sacc = 0;  % initializing binary output flag that indicates whether this trial contains a saccade
+    sacc_times = [];
+    
+    % get x and  y in degrees
+    x = xgaze/ppd;
+    y = ygaze/ppd;
+    [velocity, acceleration] = get_velocity (x, y, Hz);
+    saccades = double(velocity > threshold);  % getting vector of samples that violate velocity threshold
+    
+    borders = diff(saccades);   % start points of candidate saccades will be 1, end points will be -1, all others 0
+    if saccades(1)>threshold, borders = [1 borders]; else borders = [0 borders]; end  % in case first sample violates threshold
+    if saccades(end)>threshold, borders(end+1) = -1; end  % in case last sample violates threshold
+        
+    starts = find(borders==1); ends = find(borders==-1)-1;  % getting all start and end points of candidate saccades
+    for i = 1:length(starts)  % looping through all candidate saccades and only accepting if they also violate acceleration threshold
+        if ~isempty(find(acceleration(starts(i):ends(i))>acc_thresh))
+            sacc = 1;
+            sacc_times(end+1,1:2) = [starts(i) ends(i)];
+        end
+    end
+        
+end
+
+function [velocity,acceleration] = get_velocity (x, y, Hz)
+
+    % Compute velocity and acceleration of eye movements
+    % Based on Niklas py script "The function asumes that the values in x,y are
+    % sampled continuously at a rate specified by Hz"
+    velocity_window_size = 3;
+    Hz = double(Hz);
+    distance = (diff(x).^2 + diff(y).^2).^.5;
+    distance = [distance(1) distance];
+    win = ones(1,velocity_window_size)/double(velocity_window_size);
+    velocity = conv(distance, win, 'same');
+    velocity = velocity / (velocity_window_size/Hz);
+    acceleration = diff(velocity) / (1/Hz);
+    acceleration = abs([acceleration(1) acceleration]);
+
+end

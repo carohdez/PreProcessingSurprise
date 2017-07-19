@@ -1,22 +1,22 @@
 % % Script for loading CTF MEG data file for Surprise study and counting
 % % number of events per block
-% clear, clc
-% 
-% addpath '/mnt/homes/home024/pmurphy/Toolboxes/fieldtrip-20160221'
-% ft_defaults
-% 
-% cd /mnt/homes/home024/pmurphy/meg_data/surprise/  % specify path where dataset is located
-% cfg = [];
-% cfg.dataset = 'TFD-1_Surprise_20170315_01.ds';   % specify dataset to be loaded
-% 
-% %hdr = ft_read_header(cfg.dataset);  % read header
-% %dat = ft_read_data(cfg.dataset);   % read data
-% event = ft_read_event(cfg.dataset);  % read events
-% 
+clear, clc
+
+addpath '/mnt/homes/home024/pmurphy/Toolboxes/fieldtrip-20160221'
+ft_defaults
+
+cd /mnt/homes/home024/pmurphy/meg_data/surprise/  % specify path where dataset is located
+%cd /mnt/homes/home024/chernandez/
+cfg = [];
+cfg.dataset = 'QNV-4_Surprise_20170523_01.ds';   % specify dataset to be loaded
+
+%hdr = ft_read_header(cfg.dataset);  % read header
+%dat = ft_read_data(cfg.dataset);   % read data
+event = ft_read_event(cfg.dataset);  % read events
+
 % %data = ft_preprocessing(cfg);
 
 % Extract event markers
-event =cfg.event;
 real_events = [];
 for e = 1:length(event)
         if strcmp(event(e).type,'UPPT001')

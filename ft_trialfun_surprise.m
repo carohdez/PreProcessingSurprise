@@ -1,6 +1,4 @@
 function [trl, event] = ft_trialfun_surprise(cfg)
-
-trials_behav = [];
 dir_behav = '/mnt/homes/home024/pmurphy/Surprise_accumulation/Data/';
 
 %triggers of interest
@@ -12,8 +10,6 @@ end_tr = [61];              %offset of feedback/onset of break period
 sampleon_tr = [21];         %onset individual sample
 startblock_tr = [1];        %start block
 endblock_tr = [2];          %end block
-
-trl = [];
 % read the header, contains the sampling frequency
 hdr = ft_read_header(cfg.dataset);
 
@@ -36,21 +32,27 @@ recording = cfg.rec;
 % first element of the block
 dir_behaviour = [dir_behav,subject,'/S',session,'/Behaviour/'];
 dir_samples = [dir_behav,subject,'/S',session,'/Sample_seqs/'];
-blockbehav = 0;
 samples_x_trial = 0;
+trl = [];
+trials_behav = [];
 
 subjfile = dir([dir_behaviour,'*','.mat']);
 sessfile = dir([dir_samples,'*','.mat']);
 
+% special case TSJ 2, 10 ET blocks (move block 10 to the end to mantain order)
+if strcmp(subject,'TSJ') && strcmp(session,'2')
+    subjfile(end+1) = subjfile(2);
+    subjfile(2) = [];
+    sessfile(end+1) = sessfile(2);
+    sessfile(2) = [];
+end
 
 for i=1:length(subjfile),               %block
     load([dir_behaviour, subjfile(i).name]);
     load([dir_samples, sessfile(i).name]);
-    nrtrials_block = length(Behav);
-    blockbehav = blockbehav + 1;
     for j=1:length(Behav),              %trial
         samples_x_trial = sum(~isnan(stimIn(j,:)),2); 
-        new_trial = [blockbehav j samples_x_trial 0];
+        new_trial = [i j samples_x_trial 0];
         if length(trials_behav) == 0
             trials_behav = new_trial;
         else
@@ -65,9 +67,6 @@ if isfield(cfg, 'event')
 else
    event = ft_read_event(cfg.dataset);
 end
-
-
-
 
 % create vectors that will contain the samples of triggers of interest
 sel = true(1, length(event));  
@@ -105,11 +104,9 @@ end
 
 % convert from boolean vector into a list of indices of the events of interest
 sel = find(sel);
-selinit = find(selinit);
 selgocue = find(selgocue);
 selresponse = find(selresponse);
 selfeedback = find(selfeedback);
-selend = find(selend);
 selsampleon = find(selsampleon);
 selstartblock = find(selstartblock);
 selendblock = find(selendblock);
@@ -118,7 +115,7 @@ nr_trial=0;         %to count trial within dataset
 nr_trial_wblock=0;  %to count trial within block
 nr_block=0;
 
-%End interrupted
+% End interrupted
 if sel(end)>selgocue(end)
     sel(end)=[]; %remove last element
 end
@@ -126,6 +123,10 @@ if length(selstartblock)>length(selendblock)
     selendblock = [selendblock selfeedback(end)]; % consider the last selfeedback as the end of the block
 end
 
+% if the end is interrupted after the gocue (z.B. JTB 3-02)
+if sel(end)>selresponse(end) || sel(end)>selfeedback(end)
+    sel(end)=[]; %remove last element
+end
 
 %Late begining
 if sel(1)>selgocue(1)
@@ -133,6 +134,19 @@ if sel(1)>selgocue(1)
 end
 if length(selstartblock)<length(selendblock)
     selstartblock = [ 1 selstartblock]; % add a beggining, so the first block could be processed
+end
+
+% exceptional cases HBC session 2 rec 02, JTB session 3 rec 02
+% anomalous last trial with more MEG samples than behavioral file. we remove this trial
+if (strcmp(subject, 'HBC') && strcmp(session,'2') && strcmp(recording,'02')) ...
+    || (strcmp(subject, 'JTB') && strcmp(session,'3') && strcmp(recording,'02')) 
+    sel(end)=[];
+    selgocue(end)=[];
+    selresponse(end)=[];
+    selfeedback(end)=[];
+    selsampleon(end)=[];
+    selstartblock(end)=[];
+    selendblock(end)=[];
 end
 
 end_block=0; % sample of current block
@@ -149,6 +163,7 @@ for start_block = selstartblock
             ~((strcmp(subject,'EMB') && strcmp(session,'2')) ||...
             (strcmp(subject,'HBC') && strcmp(session,'3')) ||...
             (strcmp(subject,'JTB') && strcmp(session,'2')) ||...
+            (strcmp(subject,'JTB') && strcmp(session,'3')) ||...
             (strcmp(subject,'OMF') && strcmp(session,'1')) ||...
             (strcmp(subject,'PDP') && strcmp(session,'2')) ||...
             (strcmp(subject,'QNV') && strcmp(session,'4')) ||...
@@ -172,20 +187,28 @@ for start_block = selstartblock
         % HBC, Session 3
         % rec 01: blocks 1-3, rec 02: blocks 4-8
         if strcmp(subject,'HBC') && strcmp(session,'3') 
-            if strcmp(recording,'03')
+            if strcmp(recording,'02')
                 nr_block = nr_block+3;
             end
         end
-        % JTB, Session 2
-        % rec 01: blocks 1-5, rec 02: blocks 0, rec 03: blocks 6-7
-        if strcmp(subject,'JTB') && strcmp(session,'2') 
-            if strcmp(recording,'02') 
-                nr_block = 0;
-            else if strcmp(recording,'03')
-                nr_block = nr_block+5;
+        % JTB, 
+        if strcmp(subject,'JTB') 
+            % Session 2 rec 01: blocks 1-5, rec 02: blocks 0, rec 03: blocks 6-7
+            if strcmp(session,'2') 
+                if strcmp(recording,'02') 
+                    nr_block = 0;
+                end
+                if strcmp(recording,'03') 
+                    nr_block = nr_block+5;
                 end
             end
-        end      
+            % Session 3 rec 01: blocks 1-5, rec 02: blocks 7-9. Behavioral 6 was interrupted, not included on MEG
+            if strcmp(session,'3') && strcmp(recording,'02') 
+                nr_block = nr_block+6; 
+            end
+
+        end
+        
         % OMF, Session 1
         % rec 01: blocks 1-4, rec 02: blocks 5-8
         if strcmp(subject,'OMF') && strcmp(session,'1') 
@@ -221,15 +244,17 @@ for start_block = selstartblock
             end
         end
         % TSJ, Session 2
-        % rec 01: blocks 1-5, rec 02: blocks 0, rec 03: blocks 6-7
+        % head_loc crash, then blocks 3 and 4 are not useful
+        % rec 01: blocks 1-2, rec 02: blocks 4-6, rec 03: blocks 7-10
+        % block 3 doesn't exist, ET file 3 shouldn't be used
         if strcmp(subject,'TSJ') && strcmp(session,'2') 
             if strcmp(recording,'02') 
-                nr_block = nr_block+2;
+                nr_block = nr_block+3;
             else if strcmp(recording,'03')
-                nr_block = nr_block+5;
+                nr_block = nr_block+6;
                 end
             end
-        end
+        end       
     end
     % calculate the real number of trial within block based on behavioral,
     % starting from the end of sel list (it assumes that MEG data always contain
@@ -248,14 +273,27 @@ for start_block = selstartblock
     if length(sel_block) > length(trials_behav_block)
         sel_block(end)=[]; %remove last element
     end
+    % exceptional case, TFD MEG recording started from 3rd trial in block 6
+    if nr_block ==6 && strcmp(subject,'TFD') && strcmp(session,'3') && strcmp(recording,'02') 
+        trials_behav_block(1:3,:)=[]; %remove last element
     % if behav contains more trials than MEG (zB GSB session 1 rec 02)
-    if length(sel_block) < length(trials_behav_block)
-        trials_behav_block(end,:)=[]; %remove last element
+    else if length(sel_block) < length(trials_behav_block)
+            trials_behav_block(end,:)=[]; %remove last element
+        end
     end
     trbehav_ind = length(trials_behav_block);    
     for i=length(sel_block):-1:1
         trials_behav_block(trbehav_ind,4) = sel_block(i);               % setting the sample from meg data in behav trials
         trbehav_ind = trbehav_ind - 1;
+    end
+    
+    % exceptional case HBC session 2 rec 02, anomalous last trial with more MEG samples than behavioral file. we remove this trial
+    if strcmp(subject, 'HBC') && strcmp(session,'2') && nr_block == 9
+        sel_block(end)=[];
+        selgocue_block(end)=[];
+        selresponse_block(end)=[];
+        selfeedback_block(end)=[];
+        selsampleon_block(end)=[];
     end
     nr_trial_meg=0;
     
@@ -333,7 +371,7 @@ for start_block = selstartblock
         else
           trl = [trl; new_trial];
         end
-
+        
         cfg.trl = trl;               
     end
     first_meg_block = false;

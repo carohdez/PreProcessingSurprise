@@ -62,12 +62,26 @@ for i=1:length(subjfile),               %block
 end
 
 % read the events    subject = cfg.dataset(1:3);
-if isfield(cfg, 'event')
-   event = cfg.event;
-else
-   event = ft_read_event(cfg.dataset);
-end
 
+if ~(strcmp(subject,'QNV') && strcmp(session,'3'))
+    if isfield(cfg, 'event')
+       event = cfg.event;
+    else
+       event = ft_read_event(cfg.dataset);
+    end
+else
+    % Load reconstructed triggers for session 3 subject QNV
+    % Build and save artificial event structure that can by used by trial function
+    load(['/mnt/homes/home024/chernandez/meg_data/surprise/preprocessed/Data/qnv_corr_coef/' 'qnv_triggersET_3_' recording '.mat']);
+    event = [];
+    for i = 1:length(triggersET)
+        event(i,1).type = 'UPPT001';
+        event(i,1).sample = triggersET(i,2);
+        event(i,1).value = triggersET(i,1);
+        event(i,1).offset = [];
+        event(i,1).duration = [];
+    end
+end
 % create vectors that will contain the samples of triggers of interest
 sel = true(1, length(event));  
 selinit = true(1, length(event));
@@ -226,7 +240,7 @@ for start_block = selstartblock
                 end
             end
         end
-        % QNV, Session 1
+        % QNV, Session 4
         % rec 01: blocks 1-4, rec 02: blocks 5-9
         if strcmp(subject,'QNV') && strcmp(session,'4') 
             if strcmp(recording,'02')
